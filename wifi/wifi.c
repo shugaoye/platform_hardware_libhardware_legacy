@@ -18,6 +18,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <string.h>
+#include <dirent.h>
 
 #include "hardware_legacy/wifi.h"
 #include "libwpa_client/wpa_ctrl.h"
@@ -47,26 +48,15 @@ extern int delete_module(const char *, unsigned int);
 static char iface[PROPERTY_VALUE_MAX];
 // TODO: use new ANDROID_SOCKET mechanism, once support for multiple
 // sockets is in
-
-#ifndef WIFI_DRIVER_MODULE_PATH
-#define WIFI_DRIVER_MODULE_PATH         "/system/lib/modules/wlan.ko"
-#endif
-#ifndef WIFI_DRIVER_MODULE_NAME
-#define WIFI_DRIVER_MODULE_NAME         "wlan"
-#endif
-#ifndef WIFI_DRIVER_MODULE_ARG
-#define WIFI_DRIVER_MODULE_ARG          ""
-#endif
 #ifndef WIFI_FIRMWARE_LOADER
 #define WIFI_FIRMWARE_LOADER		""
 #endif
-#define WIFI_TEST_INTERFACE		"sta"
-
+#define WIFI_TEST_INTERFACE             "sta"
+#define SYSFS_PATH_MAX 256
+#define SYSFS_CLASS_NET "/sys/class/net"
+static const char SYS_FS_NET_DIR[]      = "/sys/class/net";
+static const char SYS_MOD_NAME_DIR[]    = "device/driver/module/drivers";
 static const char IFACE_DIR[]           = "/data/system/wpa_supplicant";
-static const char DRIVER_MODULE_NAME[]  = WIFI_DRIVER_MODULE_NAME;
-static const char DRIVER_MODULE_TAG[]   = WIFI_DRIVER_MODULE_NAME " ";
-static const char DRIVER_MODULE_PATH[]  = WIFI_DRIVER_MODULE_PATH;
-static const char DRIVER_MODULE_ARG[]   = WIFI_DRIVER_MODULE_ARG;
 static const char FIRMWARE_LOADER[]     = WIFI_FIRMWARE_LOADER;
 static const char DRIVER_PROP_NAME[]    = "wlan.driver.status";
 static const char SUPPLICANT_NAME[]     = "wpa_supplicant";
@@ -133,35 +123,76 @@ const char *get_dhcp_error_string() {
     return dhcp_lasterror();
 }
 
-static int check_driver_loaded() {
-    char driver_status[PROPERTY_VALUE_MAX];
-    FILE *proc;
-    char line[sizeof(DRIVER_MODULE_TAG)+10];
+static int get_driver_info() {
+    DIR  *netdir;
+    struct dirent *de;
+    char path[SYSFS_PATH_MAX];
+    int ret = 0;
 
-    if (!property_get(DRIVER_PROP_NAME, driver_status, NULL)
-            || strcmp(driver_status, "ok") != 0) {
-        return 0;  /* driver not loaded */
-    }
-    /*
-     * If the property says the driver is loaded, check to
-     * make sure that the property setting isn't just left
-     * over from a previous manual shutdown or a runtime
-     * crash.
-     */
-    if ((proc = fopen(MODULE_FILE, "r")) == NULL) {
-        LOGW("Could not open %s: %s", MODULE_FILE, strerror(errno));
-        property_set(DRIVER_PROP_NAME, "unloaded");
-        return 0;
-    }
-    while ((fgets(line, sizeof(line), proc)) != NULL) {
-        if (strncmp(line, DRIVER_MODULE_TAG, strlen(DRIVER_MODULE_TAG)) == 0) {
-            fclose(proc);
-            return 1;
+    if ((netdir = opendir(SYS_FS_NET_DIR)) != NULL) {
+        while((de = readdir(netdir))!=NULL) {
+            struct dirent **namelist = NULL;
+            int cnt;
+            if ((!strcmp(de->d_name,".")) || (!strcmp(de->d_name,"..")))
+                continue;
+            snprintf(path, SYSFS_PATH_MAX,SYSFS_CLASS_NET"/%s/wireless",de->d_name);
+            if (access(path, F_OK))
+                continue;
+            snprintf(path,SYSFS_PATH_MAX,SYSFS_CLASS_NET"/%s/%s",de->d_name,SYS_MOD_NAME_DIR);
+            errno = 0;
+            if ((cnt = scandir(path,&namelist,NULL,NULL)) > 0 ) {
+                char *mod;
+                int i;
+                for ( i = 0 ; i < cnt ; i ++) {
+                    if ((!strcmp(de->d_name,".")) || (!strcmp(de->d_name,"..")))
+                        continue;
+                    strtok(namelist[i]->d_name,":");
+                    mod = strtok(NULL,":");
+                    if (mod) {
+                        property_set("wlan.interface",de->d_name);
+                        property_set(DRIVER_PROP_NAME,"ok");
+                        property_set("wlan.modname",mod);
+                        break;
+                    }
+               }
+
+               for ( i = 0 ; i < cnt ; i++ ) if (namelist[i]) free(namelist[i]);
+               free(namelist);
+               if (mod) {
+                   ret = 1;
+                   break;
+               }
+            } else {
+                LOGE("Can not scan %s:%d",path,errno);
+            }
         }
     }
-    fclose(proc);
-    property_set(DRIVER_PROP_NAME, "unloaded");
-    return 0;
+    closedir(netdir);
+
+    return ret;
+}
+
+static int check_driver_loaded() {
+    char driver_status[PROPERTY_VALUE_MAX];
+    int ret;
+
+    if (property_get(DRIVER_PROP_NAME, driver_status, NULL)) {
+        LOGI("Found driver name prop");
+        if ( strcmp(driver_status, "ok") != 0) {
+            return 1;  /* driver loaded */
+        } else {
+            return 0;  /* Someone has unloaded driver */
+        }
+    }
+    /*
+     * This may be the first time we are here and the init
+     * script may already installed the driver for us. In
+     * that case, we just need to check sys/classs/net/
+     * to find the right driver
+     */
+    if (!(ret = get_driver_info()))
+        property_set(DRIVER_PROP_NAME, "unloaded");
+    return ret;
 }
 
 int wifi_load_driver()
@@ -173,7 +204,10 @@ int wifi_load_driver()
         return 0;
     }
 
-    if (insmod(DRIVER_MODULE_PATH, DRIVER_MODULE_ARG) < 0)
+    if (!property_get("wlan.modpath",driver_status,NULL))
+        return -1;
+
+    if (insmod(driver_status,"") < 0)
         return -1;
 
     if (strcmp(FIRMWARE_LOADER,"") == 0) {
@@ -186,8 +220,11 @@ int wifi_load_driver()
     sched_yield();
     while (count-- > 0) {
         if (property_get(DRIVER_PROP_NAME, driver_status, NULL)) {
-            if (strcmp(driver_status, "ok") == 0)
+            if (strcmp(driver_status, "ok") == 0) {
+                /* Update the system prop */
+                get_driver_info();
                 return 0;
+            }
             else if (strcmp(DRIVER_PROP_NAME, "failed") == 0)
                 return -1;
         }
@@ -199,9 +236,13 @@ int wifi_load_driver()
 
 int wifi_unload_driver()
 {
+    char driver_status[PROPERTY_VALUE_MAX];
     int count = 20; /* wait at most 10 seconds for completion */
 
-    if (rmmod(DRIVER_MODULE_NAME) == 0) {
+    if (!property_get("wlan.modname",driver_status,NULL))
+        return -1;
+
+    if (rmmod(driver_status) == 0) {
 	while (count-- > 0) {
 	    if (!check_driver_loaded())
 		break;
@@ -365,7 +406,7 @@ int wifi_connect_to_supplicant()
         return -1;
     }
 
-    property_get("wifi.interface", iface, WIFI_TEST_INTERFACE);
+    property_get("wlan.interface", iface, WIFI_TEST_INTERFACE);
 
     if (access(IFACE_DIR, F_OK) == 0) {
         snprintf(ifname, sizeof(ifname), "%s/%s", IFACE_DIR, iface);
