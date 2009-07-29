@@ -55,7 +55,7 @@ static char iface[PROPERTY_VALUE_MAX];
 #define SYSFS_PATH_MAX 256
 #define SYSFS_CLASS_NET "/sys/class/net"
 static const char SYS_FS_NET_DIR[]      = "/sys/class/net";
-static const char SYS_MOD_NAME_DIR[]    = "device/driver/module/drivers";
+static const char SYS_MOD_NAME_DIR[]    = "device/driver/module";
 static const char IFACE_DIR[]           = "/data/system/wpa_supplicant";
 static const char FIRMWARE_LOADER[]     = WIFI_FIRMWARE_LOADER;
 static const char DRIVER_PROP_NAME[]    = "wlan.driver.status";
@@ -127,6 +127,7 @@ static int get_driver_info() {
     DIR  *netdir;
     struct dirent *de;
     char path[SYSFS_PATH_MAX];
+    char link[SYSFS_PATH_MAX];
     int ret = 0;
 
     if ((netdir = opendir(SYS_FS_NET_DIR)) != NULL) {
@@ -139,31 +140,23 @@ static int get_driver_info() {
             if (access(path, F_OK))
                 continue;
             snprintf(path,SYSFS_PATH_MAX,SYSFS_CLASS_NET"/%s/%s",de->d_name,SYS_MOD_NAME_DIR);
-            errno = 0;
-            if ((cnt = scandir(path,&namelist,NULL,NULL)) > 0 ) {
-                char *mod;
-                int i;
-                for ( i = 0 ; i < cnt ; i ++) {
-                    if ((!strcmp(de->d_name,".")) || (!strcmp(de->d_name,"..")))
-                        continue;
-                    strtok(namelist[i]->d_name,":");
-                    mod = strtok(NULL,":");
-                    if (mod) {
-                        property_set("wlan.interface",de->d_name);
-                        property_set(DRIVER_PROP_NAME,"ok");
-                        property_set("wlan.modname",mod);
-                        break;
-                    }
-               }
-
-               for ( i = 0 ; i < cnt ; i++ ) if (namelist[i]) free(namelist[i]);
-               free(namelist);
-               if (mod) {
+            cnt = readlink(path, link,SYSFS_PATH_MAX-1);
+            if (cnt > 0 ) {
+                char *mod = NULL, *mod1 = NULL;
+                link[cnt] = '\0';
+                strtok(link,"/");
+                while((mod = strtok(NULL,"/")) != NULL) {
+                    mod1 = mod;
+                }
+                if (mod1) {
+                   property_set("wlan.interface",de->d_name);
+                   property_set(DRIVER_PROP_NAME,"ok");
+                   property_set("wlan.modname",mod1);
                    ret = 1;
                    break;
-               }
+                }
             } else {
-                LOGE("Can not scan %s:%d",path,errno);
+                LOGI("can not find link");
             }
         }
     }
