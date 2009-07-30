@@ -136,9 +136,12 @@ static int get_driver_info() {
             int cnt;
             if ((!strcmp(de->d_name,".")) || (!strcmp(de->d_name,"..")))
                 continue;
-            snprintf(path, SYSFS_PATH_MAX,SYSFS_CLASS_NET"/%s/wireless",de->d_name);
-            if (access(path, F_OK))
-                continue;
+            snprintf(path, SYSFS_PATH_MAX,SYSFS_CLASS_NET"/%s/wireless", de->d_name);
+            if (access(path, F_OK)) {
+                snprintf(path, SYSFS_PATH_MAX,SYSFS_CLASS_NET"/%s/phy80211", de->d_name);
+                if (access(path, F_OK))
+                    continue;
+            }
             snprintf(path,SYSFS_PATH_MAX,SYSFS_CLASS_NET"/%s/%s",de->d_name,SYS_MOD_NAME_DIR);
             cnt = readlink(path, link,SYSFS_PATH_MAX-1);
             if (cnt > 0 ) {
