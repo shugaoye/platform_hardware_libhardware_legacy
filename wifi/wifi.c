@@ -54,10 +54,9 @@ static char iface[PROPERTY_VALUE_MAX];
 #endif
 #define WIFI_TEST_INTERFACE             "sta"
 #define SYSFS_PATH_MAX                  256
-#define SYSFS_CLASS_NET                 "/sys/class/net"
-#define MODULE_DEFAULT_DIR              "/lib/modules"
 #define PARSE_BUF_SIZE                  4096 /* Should be long enough */
-static const char SYS_FS_NET_DIR[]      = "/sys/class/net";
+static const char SYSFS_CLASS_NET[]     = "/sys/class/net";
+static const char MODULE_DEFAULT_DIR[]  = "/lib/modules";
 static const char SYS_MOD_NAME_DIR[]    = "device/driver/module";
 static const char IFACE_DIR[]           = "/data/system/wpa_supplicant";
 static const char FIRMWARE_LOADER[]     = WIFI_FIRMWARE_LOADER;
@@ -126,7 +125,7 @@ const char *get_dhcp_error_string() {
     return dhcp_lasterror();
 }
 
-static int get_driver_path( char *path, char *mname,int len) {
+static int get_driver_path( const char *mname,char *path, unsigned int len) {
     struct utsname un;
     FILE *fd;
     int ret = 0, cnt;
@@ -176,19 +175,19 @@ static int get_driver_info() {
     char link[SYSFS_PATH_MAX];
     int ret = 0;
 
-    if ((netdir = opendir(SYS_FS_NET_DIR)) != NULL) {
+    if ((netdir = opendir(SYSFS_CLASS_NET)) != NULL) {
         while((de = readdir(netdir))!=NULL) {
             struct dirent **namelist = NULL;
             int cnt;
             if ((!strcmp(de->d_name,".")) || (!strcmp(de->d_name,"..")))
                 continue;
-            snprintf(path, SYSFS_PATH_MAX,SYSFS_CLASS_NET"/%s/phy80211",de->d_name);
+            snprintf(path, SYSFS_PATH_MAX,"%s/%s/phy80211",SYSFS_CLASS_NET,de->d_name);
             if (access(path, F_OK)) {
-                snprintf(path, SYSFS_PATH_MAX,SYSFS_CLASS_NET"/%s/wireless",de->d_name);
+                snprintf(path, SYSFS_PATH_MAX,"%s/%s/wireless",SYSFS_CLASS_NET,de->d_name);
                 if (access(path, F_OK))
                     continue;
             }
-            snprintf(path,SYSFS_PATH_MAX,SYSFS_CLASS_NET"/%s/%s",de->d_name,SYS_MOD_NAME_DIR);
+            snprintf(path,SYSFS_PATH_MAX,"%s/%s/%s",SYSFS_CLASS_NET,de->d_name,SYS_MOD_NAME_DIR);
             cnt = readlink(path, link,SYSFS_PATH_MAX-1);
             if (cnt > 0 ) {
                 char *mod = NULL, *mod1 = NULL;
@@ -202,7 +201,7 @@ static int get_driver_info() {
                    property_set(DRIVER_PROP_NAME,"ok");
                    property_set("wlan.modname",mod1);
                    snprintf(link,SYSFS_PATH_MAX,"%s.ko",mod1);
-                   if ( (cnt = get_driver_path(path, link, SYSFS_PATH_MAX)) > 0)
+                   if ( (cnt = get_driver_path(link,path,SYSFS_PATH_MAX)) > 0)
                    {
                        property_set("wlan.modpath",path);
                    } else {
