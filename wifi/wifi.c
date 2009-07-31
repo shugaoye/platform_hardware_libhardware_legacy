@@ -33,6 +33,7 @@
 #define _REALLY_INCLUDE_SYS__SYSTEM_PROPERTIES_H_
 #include <sys/_system_properties.h>
 #endif
+#include <sys/utsname.h>
 
 static struct wpa_ctrl *ctrl_conn;
 static struct wpa_ctrl *monitor_conn;
@@ -52,8 +53,10 @@ static char iface[PROPERTY_VALUE_MAX];
 #define WIFI_FIRMWARE_LOADER		""
 #endif
 #define WIFI_TEST_INTERFACE             "sta"
-#define SYSFS_PATH_MAX 256
-#define SYSFS_CLASS_NET "/sys/class/net"
+#define SYSFS_PATH_MAX                  256
+#define SYSFS_CLASS_NET                 "/sys/class/net"
+#define MODULE_DEFAULT_DIR              "/lib/modules"
+#define PARSE_BUF_SIZE                  4096 /* Should be long enough */
 static const char SYS_FS_NET_DIR[]      = "/sys/class/net";
 static const char SYS_MOD_NAME_DIR[]    = "device/driver/module";
 static const char IFACE_DIR[]           = "/data/system/wpa_supplicant";
@@ -123,6 +126,49 @@ const char *get_dhcp_error_string() {
     return dhcp_lasterror();
 }
 
+static int get_driver_path( char *path, char *mname,int len) {
+    struct utsname un;
+    FILE *fd;
+    int ret = 0, cnt;
+    char *parse_buf;
+    char *tptr,*pos;
+    parse_buf = malloc(PARSE_BUF_SIZE);
+    if (parse_buf ) {
+        if (uname(&un) >= 0 ) {
+            /* find the path under release dir */
+            chdir(MODULE_DEFAULT_DIR);
+            chdir(un.release);
+            if ((fd = fopen("modules.dep","r")) != NULL)  {
+                while(fgets(parse_buf,PARSE_BUF_SIZE-1,fd) != NULL) {
+                    pos = strchr(parse_buf,':');
+                    *pos = '\0';
+                    cnt = strlen(parse_buf);
+                    while((cnt >0) && (parse_buf[cnt -1] != '/')) cnt -- ;
+                    if (cnt >= 0 && !strcmp(&parse_buf[cnt],mname)) {
+                       /* Found */
+                       if (len >= (strlen(parse_buf)+strlen(MODULE_DEFAULT_DIR)+strlen(un.release) + 2 )){
+                          snprintf(path, len, "%s/%s/%s",MODULE_DEFAULT_DIR,un.release,parse_buf);
+                          ret = cnt;
+                       } else {
+                          LOGE("%s input buffer is too small",__FUNCTION__);
+                       }
+                       break;
+                    }
+                }
+            } else {
+               LOGE("%s Can not find module.dep",__FUNCTION__);
+            }
+        } else {
+            LOGE("%s Can not find uname",__FUNCTION__);
+        }
+    } else {
+        LOGE("%s Wrong out of memory",__FUNCTION__);
+    }
+    if (parse_buf)
+        free(parse_buf);
+    return ret;
+}
+
 static int get_driver_info() {
     DIR  *netdir;
     struct dirent *de;
@@ -155,6 +201,14 @@ static int get_driver_info() {
                    property_set("wlan.interface",de->d_name);
                    property_set(DRIVER_PROP_NAME,"ok");
                    property_set("wlan.modname",mod1);
+                   snprintf(link,SYSFS_PATH_MAX,"%s.ko",mod1);
+                   if ( (cnt = get_driver_path(path, link, SYSFS_PATH_MAX)) > 0)
+                   {
+                       property_set("wlan.modpath",path);
+                   } else {
+                       LOGE("%s can not locate wifi driver, you will not be able to reinstall driver",
+                             __FUNCTION__);
+                   }
                    ret = 1;
                    break;
                 }
@@ -171,15 +225,14 @@ static int get_driver_info() {
 static int check_driver_loaded() {
     char driver_status[PROPERTY_VALUE_MAX];
     int ret;
-
     if (property_get(DRIVER_PROP_NAME, driver_status, NULL)) {
-        LOGI("Found driver name prop");
         if ( strcmp(driver_status, "ok") != 0) {
             return 1;  /* driver loaded */
         } else {
             return 0;  /* Someone has unloaded driver */
         }
     }
+
     /*
      * This may be the first time we are here and the init
      * script may already installed the driver for us. In
