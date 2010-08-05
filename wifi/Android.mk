@@ -13,6 +13,10 @@ ifdef WIFI_FIRMWARE_LOADER
 LOCAL_CFLAGS += -DWIFI_FIRMWARE_LOADER=\"$(WIFI_FIRMWARE_LOADER)\"
 endif
 
+ifeq ($(BOARD_USES_LIBERTAS),true)
+LOCAL_SRC_FILES += wifi/wifi_libertas.c
+else
 LOCAL_SRC_FILES += wifi/wifi.c
+endif
 
 LOCAL_SHARED_LIBRARIES += libnetutils

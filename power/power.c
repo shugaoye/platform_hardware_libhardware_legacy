@@ -161,6 +161,9 @@ set_last_user_activity_timeout(int64_t delay)
 int
 set_screen_state(int on)
 {
+#ifdef BOARD_DISABLE_PM
+	LOGI("PM enterance is disabled -_-;;");
+#else
     QEMU_FALLBACK(set_screen_state(on));
 
     //LOGI("*** set_screen_state %d", on);
@@ -182,5 +185,6 @@ set_screen_state(int on)
     if(len < 0) {
         LOGE("Failed setting last user activity: g_error=%d\n", g_error);
     }
+#endif /* BOARD_DISABLE_PM */
     return 0;
 }
