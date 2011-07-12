@@ -348,7 +348,7 @@ int ensure_config_file_exists()
                 char *iptr = sptr + strlen("ctrl_interface=");
                 int ilen = 0;
                 int mlen = strlen(ifc);
-                if (strncmp(ifc, iptr, mlen) != 0) {
+                if (strncmp("DIR=", iptr, 4) && strncmp(ifc, iptr, mlen)) {
                     LOGE("ctrl_interface != %s", ifc);
                     while (((ilen + (iptr - pbuf)) < nread) && (iptr[ilen] != '\n'))
                         ilen++;
