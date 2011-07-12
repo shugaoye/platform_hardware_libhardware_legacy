@@ -40,3 +40,14 @@ LOCAL_MODULE:= libpower
 LOCAL_SRC_FILES += power/power.c
 
 include $(BUILD_STATIC_LIBRARY)
+
+# powerbtn executable
+include $(CLEAR_VARS)
+
+LOCAL_SRC_FILES := power/powerbtnd.c
+
+LOCAL_MODULE := powerbtnd
+LOCAL_MODULE_TAGS := optional
+LOCAL_SHARED_LIBRARIES := liblog
+
+include $(BUILD_EXECUTABLE)
