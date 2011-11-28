@@ -100,9 +100,8 @@ static char primary_iface[PROPERTY_VALUE_MAX];
 
 static const char IFACE_DIR[]           = "/data/system/wpa_supplicant";
 #ifdef WIFI_DRIVER_MODULE_PATH
-static const char DRIVER_MODULE_NAME[]  = WIFI_DRIVER_MODULE_NAME;
-static const char DRIVER_MODULE_TAG[]   = WIFI_DRIVER_MODULE_NAME " ";
-static const char DRIVER_MODULE_PATH[]  = WIFI_DRIVER_MODULE_PATH;
+static const char DRIVER_NAME_PROP[]    = "wlan.modname";
+static const char DRIVER_PATH_PROP[]    = "wlan.modpath";
 static const char DRIVER_MODULE_ARG[]   = WIFI_DRIVER_MODULE_ARG;
 #endif
 static const char FIRMWARE_LOADER[]     = WIFI_FIRMWARE_LOADER;
@@ -215,17 +214,17 @@ int wifi_change_driver_state(const char *state)
 #endif
 
 int is_wifi_driver_loaded() {
-    char driver_status[PROPERTY_VALUE_MAX];
 #ifdef WIFI_DRIVER_MODULE_PATH
+    char modname[PROPERTY_VALUE_MAX];
+    char line[PROPERTY_VALUE_MAX];
     FILE *proc;
-    char line[sizeof(DRIVER_MODULE_TAG)+10];
-#endif
+    int cnt = property_get(DRIVER_NAME_PROP, modname, WIFI_DRIVER_MODULE_NAME);
 
-    if (!property_get(DRIVER_PROP_NAME, driver_status, NULL)
-            || strcmp(driver_status, "ok") != 0) {
-        return 0;  /* driver not loaded */
-    }
-#ifdef WIFI_DRIVER_MODULE_PATH
+    if (cnt > 0)
+        modname[cnt++] = ' ';
+    else
+        goto unloaded;
+
     /*
      * If the property says the driver is loaded, check to
      * make sure that the property setting isn't just left
@@ -234,16 +233,18 @@ int is_wifi_driver_loaded() {
      */
     if ((proc = fopen(MODULE_FILE, "r")) == NULL) {
         ALOGW("Could not open %s: %s", MODULE_FILE, strerror(errno));
-        property_set(DRIVER_PROP_NAME, "unloaded");
-        return 0;
+        goto unloaded;
     }
+
     while ((fgets(line, sizeof(line), proc)) != NULL) {
-        if (strncmp(line, DRIVER_MODULE_TAG, strlen(DRIVER_MODULE_TAG)) == 0) {
+        if (strncmp(line, modname, cnt) == 0) {
             fclose(proc);
             return 1;
         }
     }
     fclose(proc);
+
+unloaded:
     property_set(DRIVER_PROP_NAME, "unloaded");
     return 0;
 #else
@@ -261,7 +262,10 @@ int wifi_load_driver()
         return 0;
     }
 
-    if (insmod(DRIVER_MODULE_PATH, DRIVER_MODULE_ARG) < 0)
+    if (!property_get(DRIVER_PATH_PROP, driver_status, WIFI_DRIVER_MODULE_PATH))
+        return -1;
+
+    if (insmod(driver_status, DRIVER_MODULE_ARG) < 0)
         return -1;
 
     if (strcmp(FIRMWARE_LOADER,"") == 0) {
@@ -304,7 +308,11 @@ int wifi_unload_driver()
 {
     usleep(200000); /* allow to finish interface down */
 #ifdef WIFI_DRIVER_MODULE_PATH
-    if (rmmod(DRIVER_MODULE_NAME) == 0) {
+    char modname[PROPERTY_VALUE_MAX];
+    if (!property_get(DRIVER_NAME_PROP, modname, WIFI_DRIVER_MODULE_NAME))
+        return -1;
+
+    if (rmmod(modname) == 0) {
         int count = 20; /* wait at most 10 seconds for completion */
         while (count-- > 0) {
             if (!is_wifi_driver_loaded())
@@ -315,9 +323,8 @@ int wifi_unload_driver()
         if (count) {
             return 0;
         }
-        return -1;
-    } else
-        return -1;
+    }
+    return -1;
 #else
 #ifdef WIFI_DRIVER_STATE_CTRL_PARAM
     if (is_wifi_driver_loaded()) {
