@@ -297,6 +297,8 @@ int is_wifi_driver_loaded() {
     if (!cnt) {
         if (get_driver_info(modname))
             cnt = strlen(modname);
+        else if (property_get("wlan.interface", line, NULL))
+            return 1; // found an interface without modname, assume built-in
         else
             goto unloaded;
     }
