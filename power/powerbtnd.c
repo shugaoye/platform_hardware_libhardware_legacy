@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <dirent.h>
+#include <string.h>
 #include <cutils/log.h>
 #include <linux/input.h>
 #include <linux/uinput.h>
@@ -130,7 +131,7 @@ int main()
 				struct input_event iev;
 				size_t res = read(pfds[i].fd, &iev, sizeof(iev));
 				if (res < sizeof(iev)) {
-					ALOGW("insufficient input data(%d)? fd=%d", res, pfds[i].fd);
+					ALOGW("insufficient input data(%zd)? fd=%d", res, pfds[i].fd);
 					continue;
 				}
 				ALOGD("type=%d scancode=%d value=%d from fd=%d", iev.type, iev.code, iev.value, pfds[i].fd);
